@@ -10,7 +10,9 @@ import React, { useState, useEffect, useRef } from 'react';
       const [tokens, setTokens] = useState([]);
       const [error, setError] = useState(null);
       const chartRef = useRef(null);
+      const doughnutChartRef = useRef(null);
       const chartInstance = useRef(null);
+      const doughnutChartInstance = useRef(null);
 
       useEffect(() => {
         const fetchEthPrice = async () => {
@@ -32,12 +34,96 @@ import React, { useState, useEffect, useRef } from 'react';
       }, []);
 
       useEffect(() => {
-        if (tokens.length > 0 || balance !== null && chartRef.current) {
+        if ((tokens.length > 0 || balance !== null) && chartRef.current) {
           if (chartInstance.current) {
             chartInstance.current.destroy();
           }
 
           const ctx = chartRef.current.getContext('2d');
+          const labels = [];
+          const datasets = [];
+          const backgroundColors = [
+            'rgba(255, 99, 132, 0.6)',
+            'rgba(54, 162, 235, 0.6)',
+            'rgba(255, 206, 86, 0.6)',
+            'rgba(75, 192, 192, 0.6)',
+            'rgba(153, 102, 255, 0.6)',
+            'rgba(255, 159, 64, 0.6)',
+          ];
+          let colorIndex = 0;
+
+          const data = [];
+          if (balance) {
+            labels.push('ETH');
+            data.push(balance / 1000000000000000000);
+          }
+
+          tokens.forEach(token => {
+            labels.push(token.tokenSymbol);
+            data.push(token.value / Math.pow(10, token.tokenDecimal));
+          });
+
+          datasets.push({
+            label: 'Balances',
+            data: data,
+            backgroundColor: labels.map(() => {
+              const color = backgroundColors[colorIndex % backgroundColors.length];
+              colorIndex++;
+              return color;
+            }),
+          });
+
+          chartInstance.current = new Chart(ctx, {
+            type: 'bar',
+            data: {
+              labels: labels,
+              datasets: datasets,
+            },
+            options: {
+              indexAxis: 'y',
+              responsive: true,
+              scales: {
+                x: {
+                  stacked: true,
+                },
+                y: {
+                  stacked: true,
+                },
+              },
+              plugins: {
+                legend: {
+                  display: false
+                },
+                tooltip: {
+                  callbacks: {
+                    label: (context) => {
+                      const label = context.label || '';
+                      const value = context.parsed.x || 0;
+                      const token = tokens.find(token => token.tokenSymbol === label);
+                      const balanceValue = balance ? balance / 1000000000000000000 : 0;
+                      if (label === 'ETH') {
+                        return `${label}: ${balanceValue.toFixed(4)}`;
+                      }
+                      if (token) {
+                        return `${label}: ${(token.value / Math.pow(10, token.tokenDecimal)).toFixed(4)}`;
+                      }
+                      return `${label}: ${value.toFixed(4)}`;
+                    }
+                  }
+                }
+              }
+            }
+          });
+        }
+      }, [tokens, balance]);
+
+      useEffect(() => {
+        if ((tokens.length > 0 || balance !== null) && ethPrice && doughnutChartRef.current) {
+          if (doughnutChartInstance.current) {
+            doughnutChartInstance.current.destroy();
+          }
+
+          const ctx = doughnutChartRef.current.getContext('2d');
           const labels = [];
           const data = [];
           const backgroundColors = [
@@ -49,15 +135,25 @@ import React, { useState, useEffect, useRef } from 'react';
             'rgba(255, 159, 64, 0.6)',
           ];
           let colorIndex = 0;
+          let totalValue = 0;
 
           if (balance) {
+            const ethValue = (balance / 1000000000000000000) * ethPrice;
             labels.push('ETH');
-            data.push(balance / 1000000000000000000);
+            data.push(ethValue);
+            totalValue += ethValue;
           }
 
           tokens.forEach(token => {
-            labels.push(token.tokenSymbol);
-            data.push(token.value / Math.pow(10, token.tokenDecimal));
+            let tokenValue = (token.value / Math.pow(10, token.tokenDecimal));
+            if (token.tokenSymbol === 'USDT') {
+              tokenValue = tokenValue;
+            } else {
+              tokenValue = tokenValue * ethPrice;
+            }
+              labels.push(token.tokenSymbol);
+              data.push(tokenValue);
+              totalValue += tokenValue;
           });
 
           const backgroundColorsForChart = labels.map(() => {
@@ -66,12 +162,12 @@ import React, { useState, useEffect, useRef } from 'react';
             return color;
           });
 
-          chartInstance.current = new Chart(ctx, {
-            type: 'pie',
+          doughnutChartInstance.current = new Chart(ctx, {
+            type: 'doughnut',
             data: {
               labels: labels,
               datasets: [{
-                label: 'Token Balances',
+                label: 'Crypto Values',
                 data: data,
                 backgroundColor: backgroundColorsForChart,
                 hoverOffset: 4
@@ -83,8 +179,9 @@ import React, { useState, useEffect, useRef } from 'react';
                   callbacks: {
                     label: (context) => {
                       const label = context.label || '';
-                      const value = context.formattedValue || '';
-                      return `${label}: ${value}`;
+                      const value = context.parsed || 0;
+                      const percentage = ((value / totalValue) * 100).toFixed(2);
+                      return `${label}: $${value.toFixed(2)} (${percentage}%)`;
                     }
                   }
                 }
@@ -92,7 +189,7 @@ import React, { useState, useEffect, useRef } from 'react';
             }
           });
         }
-      }, [tokens, balance]);
+      }, [tokens, balance, ethPrice]);
 
       const fetchBalance = async () => {
         setError(null);
@@ -172,8 +269,13 @@ import React, { useState, useEffect, useRef } from 'react';
             <button onClick={fetchBalance}>Fetch Balances</button>
           </div>
           {error && <p style={{ color: 'red' }}>{error}</p>}
-          <div className="chart-container">
-            <canvas ref={chartRef}></canvas>
+          <div style={{ display: 'flex' }}>
+            <div className="chart-container" style={{ width: '50%', marginRight: '10px' }}>
+              <canvas ref={chartRef}></canvas>
+            </div>
+            <div className="chart-container" style={{ width: '50%' }}>
+              <canvas ref={doughnutChartRef}></canvas>
+            </div>
           </div>
           {(tokens.length > 0 || balance !== null) && (
             <p>Total Value: ≈ ${totalValue.toFixed(2)}</p>
