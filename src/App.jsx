@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
     import Chart from 'chart.js/auto';
 
-    const API_KEY = 'ZEISSGIM1EU91GCPIMN97CYXM74P9TPRXQ';
+    const API_KEY_ARBISCAN = 'ZEISSGIM1EU91GCPIMN97CYXM74P9TPRXQ';
+    const API_KEY_COINGECKO = 'CG-zxFvPSvhvCXsZXN9SxugiLTU';
 
     function App() {
       const [address, setAddress] = useState('');
@@ -11,13 +12,16 @@ import React, { useState, useEffect, useRef } from 'react';
       const [error, setError] = useState(null);
       const chartRef = useRef(null);
       const doughnutChartRef = useRef(null);
+      const chartAxisTypesRef = useRef(null);
       const chartInstance = useRef(null);
       const doughnutChartInstance = useRef(null);
+      const chartAxisTypesInstance = useRef(null);
+      const [historicalData, setHistoricalData] = useState(null);
 
       useEffect(() => {
         const fetchEthPrice = async () => {
           try {
-            const url = `https://api.arbiscan.io/api?module=stats&action=ethprice&apikey=${API_KEY}`;
+            const url = `https://api.arbiscan.io/api?module=stats&action=ethprice&apikey=${API_KEY_ARBISCAN}`;
             const response = await fetch(url);
             const data = await response.json();
             if (data.status === '1' && data.message === 'OK') {
@@ -191,6 +195,123 @@ import React, { useState, useEffect, useRef } from 'react';
         }
       }, [tokens, balance, ethPrice]);
 
+      useEffect(() => {
+        const fetchHistoricalData = async () => {
+          if ((tokens.length > 0 || balance !== null) && chartAxisTypesRef.current && ethPrice) {
+            if (chartAxisTypesInstance.current) {
+              chartAxisTypesInstance.current.destroy();
+            }
+
+            const ctx = chartAxisTypesRef.current.getContext('2d');
+            const labels = [];
+            const data = [];
+            const today = new Date();
+            const coinIds = ['ethereum'];
+            tokens.forEach(token => {
+              if (token.tokenSymbol === 'USDT') {
+                coinIds.push('tether');
+              }
+            });
+
+            const historicalDataPromises = coinIds.map(async (coinId) => {
+              const url = `https://api.coingecko.com/api/v3/coins/${coinId}/market_chart?vs_currency=usd&days=7`;
+              const response = await fetch(url, {
+                headers: {
+                  'x_cg_demo_api_key': API_KEY_COINGECKO,
+                },
+              });
+              if (!response.ok) {
+                throw new Error(`Failed to fetch historical data for ${coinId}`);
+              }
+              return response.json();
+            });
+
+            try {
+              const historicalDataResults = await Promise.all(historicalDataPromises);
+              const historicalDataMap = {};
+              coinIds.forEach((coinId, index) => {
+                historicalDataMap[coinId] = historicalDataResults[index].prices;
+              });
+              setHistoricalData(historicalDataMap);
+
+              for (let i = 6; i >= 0; i--) {
+                const date = new Date(today);
+                date.setDate(today.getDate() - i);
+                const formattedDate = date.toLocaleDateString();
+                labels.push(formattedDate);
+
+                let totalValue = 0;
+                if (balance) {
+                  const ethPriceAtDate = historicalDataMap['ethereum']?.find(price => {
+                    const priceDate = new Date(price[0]);
+                    return priceDate.toLocaleDateString() === formattedDate;
+                  })?.[1] || ethPrice;
+                  totalValue += (balance / 1000000000000000000) * ethPriceAtDate;
+                }
+                tokens.forEach(token => {
+                  let tokenValue = (token.value / Math.pow(10, token.tokenDecimal));
+                  if (token.tokenSymbol === 'USDT') {
+                    const usdtPriceAtDate = historicalDataMap['tether']?.find(price => {
+                      const priceDate = new Date(price[0]);
+                      return priceDate.toLocaleDateString() === formattedDate;
+                    })?.[1] || 1;
+                    tokenValue = tokenValue * usdtPriceAtDate;
+                  } else {
+                    const ethPriceAtDate = historicalDataMap['ethereum']?.find(price => {
+                      const priceDate = new Date(price[0]);
+                      return priceDate.toLocaleDateString() === formattedDate;
+                    })?.[1] || ethPrice;
+                    tokenValue = tokenValue * ethPriceAtDate;
+                  }
+                  totalValue += tokenValue;
+                });
+                data.push(totalValue);
+              }
+
+              chartAxisTypesInstance.current = new Chart(ctx, {
+                type: 'line',
+                data: {
+                  labels: labels,
+                  datasets: [{
+                    label: 'Portfolio Value Over Time',
+                    data: data,
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    borderWidth: 2,
+                    fill: false,
+                  }],
+                },
+                options: {
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  scales: {
+                    x: {
+                      title: {
+                        display: true,
+                        text: 'Date',
+                      },
+                    },
+                    y: {
+                      title: {
+                        display: true,
+                        text: 'Value ($)',
+                      },
+                    },
+                  },
+                  plugins: {
+                    legend: {
+                      display: false,
+                    },
+                  },
+                },
+              });
+            } catch (error) {
+              console.error('Error fetching historical data:', error);
+            }
+          }
+        };
+        fetchHistoricalData();
+      }, [tokens, balance, ethPrice]);
+
       const fetchBalance = async () => {
         setError(null);
         if (!address) {
@@ -199,7 +320,7 @@ import React, { useState, useEffect, useRef } from 'react';
         }
 
         try {
-          const balanceUrl = `https://api.arbiscan.io/api?module=account&action=balance&address=${address}&tag=latest&apikey=${API_KEY}`;
+          const balanceUrl = `https://api.arbiscan.io/api?module=account&action=balance&address=${address}&tag=latest&apikey=${API_KEY_ARBISCAN}`;
           const balanceResponse = await fetch(balanceUrl);
           const balanceData = await balanceResponse.json();
 
@@ -210,7 +331,7 @@ import React, { useState, useEffect, useRef } from 'react';
             setBalance(null);
           }
 
-          const tokenUrl = `https://api.arbiscan.io/api?module=account&action=tokentx&address=${address}&page=1&offset=100&startblock=0&endblock=99999999&sort=asc&apikey=${API_KEY}`;
+          const tokenUrl = `https://api.arbiscan.io/api?module=account&action=tokentx&address=${address}&page=1&offset=100&startblock=0&endblock=99999999&sort=asc&apikey=${API_KEY_ARBISCAN}`;
           const tokenResponse = await fetch(tokenUrl);
           const tokenData = await tokenResponse.json();
 
@@ -276,6 +397,9 @@ import React, { useState, useEffect, useRef } from 'react';
             <div className="chart-container" style={{ width: '50%' }}>
               <canvas ref={doughnutChartRef}></canvas>
             </div>
+          </div>
+          <div className="chart-container" style={{ height: '300px', width: '100%' }}>
+            <canvas ref={chartAxisTypesRef}></canvas>
           </div>
           {(tokens.length > 0 || balance !== null) && (
             <p>Total Value: ≈ ${totalValue.toFixed(2)}</p>
